@@ -1,0 +1,86 @@
+name: "Deploy to Development"
+
+on:
+  push:
+    branches:
+      - dev
+  pull_request:
+    branches:
+      - dev
+
+jobs:
+  terraform:
+    name: "Terraform"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: infrastructure/development
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          cli_config_credentials_token: ${{ secrets:TF_API_KEY }}
+          terraform_wrapper: false
+      - name: Terraform Format
+        id: fmt
+        run: terraform fmt -check
+      - name: Terraform Init
+        id: init
+        run: terraform init
+      - name: Terraform Plan
+        id: plan
+        if: github.event_name == 'pull_request'
+        run: terraform plan -no-color
+        continue-on-error: true
+      - name: Update Pull Request
+        uses: actions/github-script@0.9.0
+        if: github.event_name == 'pull_request'
+        env:
+          PLAN: "terraform\n${{ steps.plan.outputs.stdout }}"
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `#### Terraform Format and Style 🖌\`${{ steps.fmt.outcome }}\`
+            #### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
+            #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
+            <details><summary>Show Plan</summary>
+            \`\`\`${process.env.PLAN}\`\`\`
+            </details>
+            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+            github.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+      - name: Terraform Plan Status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+      - name: Terraform Apply
+        if: github.event_name == 'push'
+        run: terraform apply -auto-approve
+      - name: Terraform Output
+        id: output
+        if: github.event_name == 'push'
+        run: |
+          web_client_bucket_dev=$(terraform output WEB_CLIENT_BUCKET_DEV)
+          web_admin_bucket_dev=$(terraform output WEB_ADMIN_BUCKET_DEV)
+          web_client_domain_dev=$(terraform output WEB_CLIENT_DOMAIN_DEV)
+          web_admin_domain_dev=$(terraform output WEB_ADMIN_DOMAIN_DEV)
+          ecr_repository_name=$(terraform output ECR_REPOSITORY_NAME_DEV)
+          alb_domain_name=$(terraform output ALB_DOMAIN_NAME_DEV)
+          echo "::set-output name=WEB_CLIENT_BUCKET_DEV::${web_client_bucket_dev}"
+          echo "::set-output name=WEB_ADMIN_BUCKET_DEV::${web_admin_bucket_dev}"
+          echo "::set-output name=WEB_CLIENT_DOMAIN_DEV::${web_client_domain_dev}"
+          echo "::set-output name=WEB_ADMIN_DOMAIN_DEV::${web_admin_domain_dev}"
+          echo "::set-output name=ECR_REPOSITORY_NAME_DEV::${ecr_repository_name}"
+          echo "::set-output name=ALB_DOMAIN_NAME_DEV::${alb_domain_name}"
+        outputs:
+          WEB_CLIENT_DOMAIN_DEV: ${{ steps.output.outputs.WEB_CLIENT_DOMAIN_DEV }}
+          WEB_ADMIN_DOMAIN_DEV: ${{ steps.output.outputs.WEB_ADMIN_DOMAIN_DEV }}
+          WEB_CLIENT_BUCKET_DEV: ${{ steps.output.outputs.WEB_CLIENT_BUCKET_DEV }}
+          WEB_ADMIN_BUCKET_DEV: ${{ steps.output.outputs.WEB_ADMIN_BUCKET_DEV }}
+          ECR_REPOSITORY_NAME_DEV: ${{ steps.output.outputs.ECR_REPOSITORY_NAME_DEV }}
+          ALB_DOMAIN_NAME_DEV: ${{ steps.output.outputs.ALB_DOMAIN_NAME_DEV }}
