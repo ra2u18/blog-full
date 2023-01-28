@@ -15,7 +15,7 @@ variable "VPC_ID" {
 }
 
 variable "CONTAINER_PORT" {
-  type = number
+  type    = number
   default = 5000
 }
 
